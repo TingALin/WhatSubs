@@ -1,4 +1,5 @@
 #![allow(unused_imports)]
+#![allow(dead_code)]
 
 use frame_support::{Parameter, StorageMap, StorageValue, ensure};
 use sp_runtime::traits::{SimpleArithmetic, Bounded};
@@ -7,6 +8,7 @@ use sp_std::{result::Result};
 use sp_std::convert::TryInto;
 use sp_std::cmp::Ordering;
 
+// 改为注入的方式
 pub const KARY: u8 = 8;
 
 pub struct MinHeapKAry<Index, Value, Count, Map> (PhantomData<(Index, Value, Count, Map)>);

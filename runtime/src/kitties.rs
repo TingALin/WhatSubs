@@ -19,14 +19,13 @@ pub trait Trait: system::Trait {
 
 type BalanceOf<T> = <<T as Trait>::Currency as Currency<<T as system::Trait>::AccountId>>::Balance;
 
-// TODO 改为注入方式
+// TODO 改为注入方式, 由pub trait Trait配置.
 const MAX_BREEDING_AGE: u32 = 40;
 
 #[derive(Encode, Decode)]
 pub struct Kitty<T> where T: Trait {
 	pub dna: [u8; 16],
-	pub birthday: T::BlockNumber,
-	pub life: T::BlockNumber,
+	pub lifespan: T::BlockNumber,
 }
 
 type KittyLinkedItem<T> = LinkedItem<<T as Trait>::KittyIndex>;
@@ -38,6 +37,8 @@ decl_storage! {
 		pub Kitties get(fn kitties): map T::KittyIndex => Option<Kitty<T>>;
 		/// Stores the total number of kitties. i.e. the next kitty index
 		pub KittiesCount get(fn kitties_count): T::KittyIndex;
+
+		pub KittyTombs get(fn kitty_tombs): double_map T::BlockNumber, T::KittyIndex => Option<(T::AccountId,T::KittyIndex)>;
 
 		pub OwnedKitties get(fn owned_kitties): map (T::AccountId, Option<T::KittyIndex>) => Option<KittyLinkedItem<T>>;
 
@@ -118,22 +119,40 @@ decl_module! {
 			Self::buy_kitty(&sender, kitty_id, price)?;
 		}
 
-		#[weight = SimpleDispatchInfo::FixedNormal(10_000)]
-		fn on_initialize(_n: T::BlockNumber) { }
+		#[weight = SimpleDispatchInfo::FixedNormal(50_000)]
+		fn on_initialize(n: T::BlockNumber) { Self::kitty_initialize(n); }
 
-		#[weight = SimpleDispatchInfo::FixedNormal(10_000)]
+		#[weight = SimpleDispatchInfo::FixedNormal(0)]
 		fn on_finalize(_n: T::BlockNumber) { }
 
-		fn offchain_worker(n: T::BlockNumber) { Self::kitty_worker(n); }
+		fn offchain_worker(_n: T::BlockNumber) { }
 	}
 }
 
-fn combine_dna(dna1: u8, dna2: u8, selector: u8) -> u8 {
-	((selector & dna1) | (!selector & dna2))
-}
+fn combine_dna(dna1: u8, dna2: u8, selector: u8) -> u8 { ((selector & dna1) | (!selector & dna2)) }
 
 impl<T: Trait> Module<T> {
-	fn kitty_worker(n: T::BlockNumber) {}
+	//noinspection RsBorrowChecker
+	fn kitty_initialize(n: T::BlockNumber) {
+		let mut i = 0;
+		for (owner, kitty_id) in <KittyTombs<T>>::iter_prefix(n) {
+			i += 1;
+			Self::remove_kitty(owner, kitty_id);
+		}
+		if i > 0 {
+			<KittiesCount<T>>::mutate(|v| {
+				*v += i.into();
+			});
+			<KittyTombs<T>>::remove_prefix(n);
+		}
+	}
+
+	fn remove_kitty(owner: T::AccountId, kitty_id: T::KittyIndex) {
+		<Kitties<T>>::remove(&kitty_id);
+		<KittyOwners<T>>::remove(&kitty_id);
+		<KittyPrices<T>>::remove(&kitty_id);
+		<OwnedKittiesList<T>>::remove(&owner, kitty_id);
+	}
 
 	fn create_kitty(sender: &T::AccountId) -> result::Result<(), DispatchError> {
 		let kitty_id = Self::next_kitty_id()?;
@@ -142,11 +161,17 @@ impl<T: Trait> Module<T> {
 		let dna = Self::random_value(sender);
 
 		// Create and store kitty
-		let kitty = Kitty { dna, life: 0u8.into(), birthday: 0u8.into() };
+		let kitty = Kitty { dna, lifespan: Self::gen_kitty_lifespan() };
 		Self::insert_kitty(sender, kitty_id, kitty);
 
 		Self::deposit_event(RawEvent::Created(sender.clone(), kitty_id));
 		Ok(())
+	}
+
+	// 猫能活13~15年.
+	fn gen_kitty_lifespan() -> T::BlockNumber {
+		// TODO 随机生成猫的寿命, 如果2s一个块. 猫能活一天 86400s, 相当于 86400/2 个块. 寿命在一定范围内随机. 13~15年. 可以以注入的方式配置. 为了测试, 可以调短一点.
+		(86400 / 2).into()
 	}
 
 	//noinspection RsUnresolvedReference
@@ -168,18 +193,15 @@ impl<T: Trait> Module<T> {
 		Ok(kitty_id)
 	}
 
-	fn insert_owned_kitty(owner: &T::AccountId, kitty_id: T::KittyIndex) {
-		<OwnedKittiesList<T>>::append(owner, kitty_id);
-	}
-
 	//noinspection RsBorrowChecker
 	fn insert_kitty(owner: &T::AccountId, kitty_id: T::KittyIndex, kitty: Kitty<T>) {
 		// Create and store kitty
-		<Kitties<T>>::insert(kitty_id, kitty);
+		<Kitties<T>>::insert(kitty_id, &kitty);
 		<KittiesCount<T>>::put(kitty_id + 1.into());
 		<KittyOwners<T>>::insert(kitty_id, owner.clone());
-
-		Self::insert_owned_kitty(owner, kitty_id);
+		<OwnedKittiesList<T>>::append(owner, kitty_id);
+		// 保存猫的死亡时间
+		<KittyTombs<T>>::insert(kitty.lifespan + Self::block_number(), kitty_id, (owner, kitty_id));
 	}
 
 	//noinspection RsBorrowChecker
@@ -229,6 +251,8 @@ impl<T: Trait> Module<T> {
 		ensure!(Self::kitty_owner(&kitty_id_1).map(|owner| owner == *sender).unwrap_or(false), Error::<T>::RequiresOwner);
 		ensure!(Self::kitty_owner(&kitty_id_2).map(|owner| owner == *sender).unwrap_or(false), Error::<T>::RequiresOwner);
 
+		// TODO 验证两只猫的年龄. 是否可以繁殖后代, 使用 MAX_BREEDING_AGE 和猫属性一起判断
+
 		let kitty_id = Self::next_kitty_id()?;
 
 		let kitty1_dna = kitty1.unwrap().dna;
@@ -243,7 +267,7 @@ impl<T: Trait> Module<T> {
 			new_dna[i] = combine_dna(kitty1_dna[i], kitty2_dna[i], selector[i]);
 		}
 
-		Self::insert_kitty(sender, kitty_id, Kitty { dna: new_dna, life: 0u8.into(), birthday: 0u8.into() });
+		Self::insert_kitty(sender, kitty_id, Kitty { dna: new_dna, lifespan: Self::gen_kitty_lifespan() });
 
 		Ok(kitty_id)
 	}
@@ -256,6 +280,9 @@ impl<T: Trait> Module<T> {
 	}
 
 	fn set_kitties_count(c: T::KittyIndex) { <KittiesCount<T>>::put(c); }
+
+	#[inline]
+	fn block_number() -> T::BlockNumber { <system::Module<T>>::block_number() }
 }
 
 /// Tests for Kitties module
