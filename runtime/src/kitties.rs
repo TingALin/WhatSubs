@@ -26,6 +26,7 @@ const MAX_BREEDING_AGE: u32 = 40;
 pub struct Kitty<T> where T: Trait {
 	pub dna: [u8; 16],
 	pub lifespan: T::BlockNumber,
+	pub birthday: T::BlockNumber,
 }
 
 type KittyLinkedItem<T> = LinkedItem<<T as Trait>::KittyIndex>;
@@ -141,7 +142,7 @@ impl<T: Trait> Module<T> {
 		}
 		if i > 0 {
 			<KittiesCount<T>>::mutate(|v| {
-				*v += i.into();
+				*v -= i.into();
 			});
 			<KittyTombs<T>>::remove_prefix(n);
 		}
@@ -161,7 +162,7 @@ impl<T: Trait> Module<T> {
 		let dna = Self::random_value(sender);
 
 		// Create and store kitty
-		let kitty = Kitty { dna, lifespan: Self::gen_kitty_lifespan() };
+		let kitty = Kitty { dna, lifespan: Self::gen_kitty_lifespan(), birthday: Self::block_number() };
 		Self::insert_kitty(sender, kitty_id, kitty);
 
 		Self::deposit_event(RawEvent::Created(sender.clone(), kitty_id));
@@ -201,7 +202,7 @@ impl<T: Trait> Module<T> {
 		<KittyOwners<T>>::insert(kitty_id, owner.clone());
 		<OwnedKittiesList<T>>::append(owner, kitty_id);
 		// 保存猫的死亡时间
-		<KittyTombs<T>>::insert(kitty.lifespan + Self::block_number(), kitty_id, (owner, kitty_id));
+		<KittyTombs<T>>::insert(kitty.lifespan + kitty.birthday, kitty_id, (owner, kitty_id));
 	}
 
 	//noinspection RsBorrowChecker
@@ -267,7 +268,7 @@ impl<T: Trait> Module<T> {
 			new_dna[i] = combine_dna(kitty1_dna[i], kitty2_dna[i], selector[i]);
 		}
 
-		Self::insert_kitty(sender, kitty_id, Kitty { dna: new_dna, lifespan: Self::gen_kitty_lifespan() });
+		Self::insert_kitty(sender, kitty_id, Kitty { dna: new_dna, lifespan: Self::gen_kitty_lifespan(), birthday: Self::block_number() });
 
 		Ok(kitty_id)
 	}
@@ -279,6 +280,7 @@ impl<T: Trait> Module<T> {
 		<KittyOwners<T>>::insert(kitty_id, to);
 	}
 
+	#[allow(dead_code)]
 	fn set_kitties_count(c: T::KittyIndex) { <KittiesCount<T>>::put(c); }
 
 	#[inline]
