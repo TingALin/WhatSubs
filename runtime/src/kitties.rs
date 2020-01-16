@@ -446,6 +446,8 @@ mod tests {
 			assert_eq!(Kitties::<Test>::get(0), None);
 			assert_eq!(Kitties::<Test>::get(1), None);
 			assert_eq!(KittiesCount::<Test>::get(), 0);
+			assert_eq!(OwnedKittiesListTest::collect(&1, None, 100).1.len(), 0);
+			assert_eq!(OwnedKittiesListTest::collect(&2, None, 100).1.len(), 0);
 		});
 	}
 
