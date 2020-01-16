@@ -142,7 +142,7 @@ impl<T: Trait> Module<T> {
 		}
 		if i > 0 {
 			<KittiesCount<T>>::mutate(|v| {
-				*v += i.into();
+				*v -= i.into();
 			});
 			<KittyTombs<T>>::remove_prefix(n);
 		}
