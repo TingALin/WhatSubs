@@ -22,6 +22,7 @@ type BalanceOf<T> = <<T as Trait>::Currency as Currency<<T as system::Trait>::Ac
 // TODO 改为注入方式, 由pub trait Trait配置.
 const MAX_BREEDING_AGE: u32 = 40;
 
+#[cfg_attr(feature = "std", derive(Debug, PartialEq, Eq))]
 #[derive(Encode, Decode)]
 pub struct Kitty<T> where T: Trait {
 	pub dna: [u8; 16],
@@ -39,7 +40,7 @@ decl_storage! {
 		/// Stores the total number of kitties. i.e. the next kitty index
 		pub KittiesCount get(fn kitties_count): T::KittyIndex;
 
-		pub KittyTombs get(fn kitty_tombs): double_map T::BlockNumber, T::KittyIndex => Option<(T::AccountId,T::KittyIndex)>;
+		pub KittyTombs get(fn kitty_tombs): double_map T::BlockNumber, T::KittyIndex => Option<T::KittyIndex>;
 
 		pub OwnedKitties get(fn owned_kitties): map (T::AccountId, Option<T::KittyIndex>) => Option<KittyLinkedItem<T>>;
 
@@ -136,9 +137,10 @@ impl<T: Trait> Module<T> {
 	//noinspection RsBorrowChecker
 	fn kitty_initialize(n: T::BlockNumber) {
 		let mut i = 0;
-		for (owner, kitty_id) in <KittyTombs<T>>::iter_prefix(n) {
+		for kitty_id in <KittyTombs<T>>::iter_prefix(n) {
 			i += 1;
-			Self::remove_kitty(owner, kitty_id);
+			let owner = <KittyOwners<T>>::get(kitty_id).unwrap();
+			Self::remove_kitty(&owner, kitty_id);
 		}
 		if i > 0 {
 			<KittiesCount<T>>::mutate(|v| {
@@ -148,11 +150,11 @@ impl<T: Trait> Module<T> {
 		}
 	}
 
-	fn remove_kitty(owner: T::AccountId, kitty_id: T::KittyIndex) {
+	fn remove_kitty(owner: &T::AccountId, kitty_id: T::KittyIndex) {
 		<Kitties<T>>::remove(&kitty_id);
 		<KittyOwners<T>>::remove(&kitty_id);
 		<KittyPrices<T>>::remove(&kitty_id);
-		<OwnedKittiesList<T>>::remove(&owner, kitty_id);
+		<OwnedKittiesList<T>>::remove(owner, kitty_id);
 	}
 
 	fn create_kitty(sender: &T::AccountId) -> result::Result<(), DispatchError> {
@@ -202,7 +204,7 @@ impl<T: Trait> Module<T> {
 		<KittyOwners<T>>::insert(kitty_id, owner.clone());
 		<OwnedKittiesList<T>>::append(owner, kitty_id);
 		// 保存猫的死亡时间
-		<KittyTombs<T>>::insert(kitty.lifespan + kitty.birthday, kitty_id, (owner, kitty_id));
+		<KittyTombs<T>>::insert(kitty.lifespan + kitty.birthday, kitty_id, kitty_id);
 	}
 
 	//noinspection RsBorrowChecker
@@ -357,6 +359,7 @@ mod tests {
 		type Randomness = randomness_collective_flip::Module<Test>;
 	}
 
+	type OwnedKittiesListTest = OwnedKittiesList<Test>;
 	type OwnedKittiesTest = OwnedKitties<Test>;
 	type KittyModule = Module<Test>;
 
@@ -413,11 +416,36 @@ mod tests {
 	#[test]
 	fn test_ask_buy() {
 		new_test_ext().execute_with(|| {
+			//kitty id 0
 			let _ = <Module<Test>>::create(Origin::signed(1));
+			//kitty id 1
+			let _ = <Module<Test>>::create(Origin::signed(2));
+			// ask kitty id 0
 			assert_ok!(<Module<Test>>::ask_kitty(&1, 0, Some(1000)));
-			let p = KittyModule::kitty_price(0);
-			assert_eq!(p, Some(1000));
+			assert_eq!(KittyModule::kitty_price(0), Some(1000));
+			assert_eq!(OwnedKittiesListTest::collect(&1, None, 100).1, &[0u8.into()]);
+			assert_eq!(OwnedKittiesListTest::collect(&2, None, 100).1, &[1u8.into()]);
+			assert_eq!(KittyOwners::<Test>::get(0), Some(1));
+			assert_eq!(KittyOwners::<Test>::get(1), Some(2));
+
 			assert_ok!(<Module<Test>>::buy_kitty(&2, 0, 1000));
+			assert_eq!(OwnedKittiesListTest::collect(&1, None, 100).1.len(), 0);
+			assert_eq!(OwnedKittiesListTest::collect(&2, None, 100).1, &[1u8.into(), 0]);
+			assert_eq!(KittyModule::kitty_price(0), None);
+			assert_eq!(KittyModule::kitty_price(1), None);
+			assert_eq!(KittyOwners::<Test>::get(0), Some(2));
+			assert_eq!(KittyOwners::<Test>::get(1), Some(2));
+
+			assert_eq!(KittiesCount::<Test>::get(), 2);
+			let kitty1 = Kitties::<Test>::get(0).unwrap();
+			let kitty2 = Kitties::<Test>::get(1).unwrap();
+			Module::<Test>::kitty_initialize(kitty1.lifespan + kitty1.birthday);
+			Module::<Test>::kitty_initialize(kitty2.lifespan + kitty2.birthday);
+			assert_eq!(KittyOwners::<Test>::get(0), None);
+			assert_eq!(KittyOwners::<Test>::get(1), None);
+			assert_eq!(Kitties::<Test>::get(0), None);
+			assert_eq!(Kitties::<Test>::get(1), None);
+			assert_eq!(KittiesCount::<Test>::get(), 0);
 		});
 	}
 
@@ -495,6 +523,8 @@ mod tests {
 				prev: Some(2),
 				next: None,
 			}));
+
+			assert_eq!(OwnedKittiesListTest::collect(&0, None, 100), (Some(3), vec![1u8.into(), 2, 3]));
 		});
 	}
 
