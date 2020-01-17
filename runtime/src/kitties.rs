@@ -1,6 +1,6 @@
 use frame_support::{
 	decl_module, decl_storage, decl_event, decl_error, ensure, StorageValue, StorageMap,
-	Parameter, traits::{Randomness, Currency, ExistenceRequirement},
+	Parameter, traits::{Randomness, Currency, ExistenceRequirement, Get},
 	weights::SimpleDispatchInfo,
 };
 use sp_runtime::{traits::{SimpleArithmetic, Bounded, Member}, DispatchError};
@@ -15,13 +15,14 @@ pub trait Trait: system::Trait {
 	type KittyIndex: Parameter + Member + SimpleArithmetic + Bounded + Default + Copy;
 	type Currency: Currency<Self::AccountId>;
 	type Randomness: Randomness<Self::Hash>;
+	type MaxBreedingAge: Get<Self::BlockNumber>;
+	type MinBreedingAge: Get<Self::BlockNumber>;
+	type MaxLifespanDelta: Get<Self::BlockNumber>;
 }
 
 type BalanceOf<T> = <<T as Trait>::Currency as Currency<<T as system::Trait>::AccountId>>::Balance;
 
-// TODO 改为注入方式, 由pub trait Trait配置.
-const MAX_BREEDING_AGE: u32 = 40;
-
+#[cfg_attr(feature = "std", derive(Debug, PartialEq, Eq))]
 #[derive(Encode, Decode)]
 pub struct Kitty<T> where T: Trait {
 	pub dna: [u8; 16],
@@ -39,7 +40,7 @@ decl_storage! {
 		/// Stores the total number of kitties. i.e. the next kitty index
 		pub KittiesCount get(fn kitties_count): T::KittyIndex;
 
-		pub KittyTombs get(fn kitty_tombs): double_map T::BlockNumber, T::KittyIndex => Option<(T::AccountId,T::KittyIndex)>;
+		pub KittyTombs get(fn kitty_tombs): double_map T::BlockNumber, T::KittyIndex => Option<T::KittyIndex>;
 
 		pub OwnedKitties get(fn owned_kitties): map (T::AccountId, Option<T::KittyIndex>) => Option<KittyLinkedItem<T>>;
 
@@ -64,6 +65,9 @@ decl_event!(
 		Ask(AccountId, KittyIndex, Option<Balance>),
 		/// A kitty is sold. (from, to, kitty_id, price)
 		Sold(AccountId, AccountId, KittyIndex, Balance),
+		/// A kitty died.(owner, kitty_id)
+		Died(AccountId, KittyIndex),
+		
 	}
 );
 
@@ -136,9 +140,11 @@ impl<T: Trait> Module<T> {
 	//noinspection RsBorrowChecker
 	fn kitty_initialize(n: T::BlockNumber) {
 		let mut i = 0;
-		for (owner, kitty_id) in <KittyTombs<T>>::iter_prefix(n) {
+		for kitty_id in <KittyTombs<T>>::iter_prefix(n) {
 			i += 1;
-			Self::remove_kitty(owner, kitty_id);
+			let owner = <KittyOwners<T>>::get(kitty_id).unwrap();
+			Self::remove_kitty(&owner, kitty_id);
+			Self::deposit_event(RawEvent::Died(owner, kitty_id));
 		}
 		if i > 0 {
 			<KittiesCount<T>>::mutate(|v| {
@@ -148,11 +154,11 @@ impl<T: Trait> Module<T> {
 		}
 	}
 
-	fn remove_kitty(owner: T::AccountId, kitty_id: T::KittyIndex) {
+	fn remove_kitty(owner: &T::AccountId, kitty_id: T::KittyIndex) {
 		<Kitties<T>>::remove(&kitty_id);
 		<KittyOwners<T>>::remove(&kitty_id);
 		<KittyPrices<T>>::remove(&kitty_id);
-		<OwnedKittiesList<T>>::remove(&owner, kitty_id);
+		<OwnedKittiesList<T>>::remove(owner, kitty_id);
 	}
 
 	fn create_kitty(sender: &T::AccountId) -> result::Result<(), DispatchError> {
@@ -162,7 +168,7 @@ impl<T: Trait> Module<T> {
 		let dna = Self::random_value(sender);
 
 		// Create and store kitty
-		let kitty = Kitty { dna, lifespan: Self::gen_kitty_lifespan(), birthday: Self::block_number() };
+		let kitty = Kitty { dna, lifespan: Self::gen_kitty_lifespan(sender), birthday: Self::block_number() };
 		Self::insert_kitty(sender, kitty_id, kitty);
 
 		Self::deposit_event(RawEvent::Created(sender.clone(), kitty_id));
@@ -170,7 +176,11 @@ impl<T: Trait> Module<T> {
 	}
 
 	// 猫能活13~15年.
-	fn gen_kitty_lifespan() -> T::BlockNumber {
+	fn gen_kitty_lifespan(sender: &T::AccountId) -> T::BlockNumber {
+		let max: T::BlockNumber = T::MaxBreedingAge::get();
+		let min: T::BlockNumber = T::MinBreedingAge::get();
+		let delta: T::BlockNumber = T::MaxLifespanDelta::get();
+		let ran: T::BlockNumber = (u128::from_be_bytes(Self::random_value(sender)) as u32).into();
 		// TODO 随机生成猫的寿命, 如果2s一个块. 猫能活一天 86400s, 相当于 86400/2 个块. 寿命在一定范围内随机. 13~15年. 可以以注入的方式配置. 为了测试, 可以调短一点.
 		(86400 / 2).into()
 	}
@@ -202,7 +212,7 @@ impl<T: Trait> Module<T> {
 		<KittyOwners<T>>::insert(kitty_id, owner.clone());
 		<OwnedKittiesList<T>>::append(owner, kitty_id);
 		// 保存猫的死亡时间
-		<KittyTombs<T>>::insert(kitty.lifespan + kitty.birthday, kitty_id, (owner, kitty_id));
+		<KittyTombs<T>>::insert(kitty.lifespan + kitty.birthday, kitty_id, kitty_id);
 	}
 
 	//noinspection RsBorrowChecker
@@ -268,7 +278,7 @@ impl<T: Trait> Module<T> {
 			new_dna[i] = combine_dna(kitty1_dna[i], kitty2_dna[i], selector[i]);
 		}
 
-		Self::insert_kitty(sender, kitty_id, Kitty { dna: new_dna, lifespan: Self::gen_kitty_lifespan(), birthday: Self::block_number() });
+		Self::insert_kitty(sender, kitty_id, Kitty { dna: new_dna, lifespan: Self::gen_kitty_lifespan(sender), birthday: Self::block_number() });
 
 		Ok(kitty_id)
 	}
@@ -350,13 +360,24 @@ mod tests {
 		type CreationFee = CreationFee;
 	}
 
+	parameter_types! {
+		// set breeding age as number of blocks
+		pub const MaxBreedingAge: u64 = 5 * 60000 / 2000;
+		pub const MinBreedingAge: u64 = 2 * 60000 / 2000;
+		pub const MaxLifespanDelta: u64 = 5 * 60_000 / 2000;
+	}
+
 	impl Trait for Test {
 		type Event = ();
 		type KittyIndex = u32;
 		type Currency = balances::Module<Test>;
 		type Randomness = randomness_collective_flip::Module<Test>;
+		type MaxBreedingAge = MaxBreedingAge;
+		type MinBreedingAge = MinBreedingAge;
+		type MaxLifespanDelta = MaxLifespanDelta;
 	}
 
+	type OwnedKittiesListTest = OwnedKittiesList<Test>;
 	type OwnedKittiesTest = OwnedKitties<Test>;
 	type KittyModule = Module<Test>;
 
@@ -405,19 +426,54 @@ mod tests {
 		new_test_ext().execute_with(|| {
 			let _ = KittyModule::create_kitty(&1);
 			assert_eq!(1, KittyModule::kitties_count());
-			KittyModule::transfer(Origin::signed(1), 0, 2);
+			let _ = KittyModule::transfer(Origin::signed(1), 0, 2);
 			assert_eq!(1, KittyModule::kitties_count());
+		});
+	}
+
+	#[test]
+	fn test_print_age_threshold() {
+		new_test_ext().execute_with(|| {
+			assert!(<Test as Trait>::MaxBreedingAge::get() > 0);
+			assert!(<Test as Trait>::MinBreedingAge::get() > 0);
 		});
 	}
 
 	#[test]
 	fn test_ask_buy() {
 		new_test_ext().execute_with(|| {
+			//kitty id 0
 			let _ = <Module<Test>>::create(Origin::signed(1));
+			//kitty id 1
+			let _ = <Module<Test>>::create(Origin::signed(2));
+			// ask kitty id 0
 			assert_ok!(<Module<Test>>::ask_kitty(&1, 0, Some(1000)));
-			let p = KittyModule::kitty_price(0);
-			assert_eq!(p, Some(1000));
+			assert_eq!(KittyModule::kitty_price(0), Some(1000));
+			assert_eq!(OwnedKittiesListTest::collect(&1, None, 100).1, &[0u8.into()]);
+			assert_eq!(OwnedKittiesListTest::collect(&2, None, 100).1, &[1u8.into()]);
+			assert_eq!(KittyOwners::<Test>::get(0), Some(1));
+			assert_eq!(KittyOwners::<Test>::get(1), Some(2));
+
 			assert_ok!(<Module<Test>>::buy_kitty(&2, 0, 1000));
+			assert_eq!(OwnedKittiesListTest::collect(&1, None, 100).1.len(), 0);
+			assert_eq!(OwnedKittiesListTest::collect(&2, None, 100).1, &[1u8.into(), 0]);
+			assert_eq!(KittyModule::kitty_price(0), None);
+			assert_eq!(KittyModule::kitty_price(1), None);
+			assert_eq!(KittyOwners::<Test>::get(0), Some(2));
+			assert_eq!(KittyOwners::<Test>::get(1), Some(2));
+
+			assert_eq!(KittiesCount::<Test>::get(), 2);
+			let kitty1 = Kitties::<Test>::get(0).unwrap();
+			let kitty2 = Kitties::<Test>::get(1).unwrap();
+			Module::<Test>::kitty_initialize(kitty1.lifespan + kitty1.birthday);
+			Module::<Test>::kitty_initialize(kitty2.lifespan + kitty2.birthday);
+			assert_eq!(KittyOwners::<Test>::get(0), None);
+			assert_eq!(KittyOwners::<Test>::get(1), None);
+			assert_eq!(Kitties::<Test>::get(0), None);
+			assert_eq!(Kitties::<Test>::get(1), None);
+			assert_eq!(KittiesCount::<Test>::get(), 0);
+			assert_eq!(OwnedKittiesListTest::collect(&1, None, 100).1.len(), 0);
+			assert_eq!(OwnedKittiesListTest::collect(&2, None, 100).1.len(), 0);
 		});
 	}
 
@@ -495,6 +551,8 @@ mod tests {
 				prev: Some(2),
 				next: None,
 			}));
+
+			assert_eq!(OwnedKittiesListTest::collect(&0, None, 100), (Some(3), vec![1u8.into(), 2, 3]));
 		});
 	}
 
