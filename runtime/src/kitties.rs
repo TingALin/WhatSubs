@@ -21,9 +21,6 @@ pub trait Trait: system::Trait {
 
 type BalanceOf<T> = <<T as Trait>::Currency as Currency<<T as system::Trait>::AccountId>>::Balance;
 
-// TODO 改为注入方式, 由pub trait Trait配置.
-// const MAX_BREEDING_AGE: u32 = 40;
-
 #[cfg_attr(feature = "std", derive(Debug, PartialEq, Eq))]
 #[derive(Encode, Decode)]
 pub struct Kitty<T> where T: Trait {
