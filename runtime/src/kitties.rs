@@ -15,12 +15,14 @@ pub trait Trait: system::Trait {
 	type KittyIndex: Parameter + Member + SimpleArithmetic + Bounded + Default + Copy;
 	type Currency: Currency<Self::AccountId>;
 	type Randomness: Randomness<Self::Hash>;
+	type MaxBreedingAge;
+	type MinBreedingAge;
 }
 
 type BalanceOf<T> = <<T as Trait>::Currency as Currency<<T as system::Trait>::AccountId>>::Balance;
 
 // TODO 改为注入方式, 由pub trait Trait配置.
-const MAX_BREEDING_AGE: u32 = 40;
+// const MAX_BREEDING_AGE: u32 = 40;
 
 #[cfg_attr(feature = "std", derive(Debug, PartialEq, Eq))]
 #[derive(Encode, Decode)]
@@ -65,6 +67,9 @@ decl_event!(
 		Ask(AccountId, KittyIndex, Option<Balance>),
 		/// A kitty is sold. (from, to, kitty_id, price)
 		Sold(AccountId, AccountId, KittyIndex, Balance),
+		/// A kittiy died.(owner, kitty_id)
+		Died(AccountId, KittyIndex),
+		
 	}
 );
 
@@ -141,6 +146,7 @@ impl<T: Trait> Module<T> {
 			i += 1;
 			let owner = <KittyOwners<T>>::get(kitty_id).unwrap();
 			Self::remove_kitty(&owner, kitty_id);
+			Self::deposit_event(RawEvent::Died(owner.clone(), kitty_id));
 		}
 		if i > 0 {
 			<KittiesCount<T>>::mutate(|v| {
@@ -148,6 +154,8 @@ impl<T: Trait> Module<T> {
 			});
 			<KittyTombs<T>>::remove_prefix(n);
 		}
+
+
 	}
 
 	fn remove_kitty(owner: &T::AccountId, kitty_id: T::KittyIndex) {
@@ -352,11 +360,20 @@ mod tests {
 		type CreationFee = CreationFee;
 	}
 
+	parameter_types! {
+
+	// set breeding age as number of blocks
+		pub const MaxBreedingAge: u64 = 5 * 60000 / MILLISECS_PER_BLOCK;
+		pub const MinBreedingAge: u64 = 2 * 60000 / MILLISECS_PER_BLOCK;
+	}
+
 	impl Trait for Test {
 		type Event = ();
 		type KittyIndex = u32;
 		type Currency = balances::Module<Test>;
 		type Randomness = randomness_collective_flip::Module<Test>;
+		type MaxBreedingAge = MaxBreedingAge;
+		type MinBreedingAge = MinBreedingAge;
 	}
 
 	type OwnedKittiesListTest = OwnedKittiesList<Test>;
