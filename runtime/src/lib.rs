@@ -38,7 +38,7 @@ pub use frame_support::{
 };
 
 /// An index to a block.
-pub type BlockNumber = u64;
+pub type BlockNumber = u32;
 
 /// Alias to 512-bit hash when used in the context of a transaction signature on the chain.
 pub type Signature = MultiSignature;
@@ -246,8 +246,9 @@ impl sudo::Trait for Runtime {
 
 parameter_types! {
 	// set breeding age as number of blocks
-	pub const MaxBreedingAge: BlockNumber = 5 * 60_000 / MILLISECS_PER_BLOCK;
-	pub const MinBreedingAge: BlockNumber = 2 * 60_000 / MILLISECS_PER_BLOCK;
+	pub const MaxBreedingAge: BlockNumber = (5 * 60_000 / MILLISECS_PER_BLOCK) as u32;
+	pub const MinBreedingAge: BlockNumber = (2 * 60_000 / MILLISECS_PER_BLOCK) as u32;
+	pub const MaxLifespanDelta: BlockNumber = (5 * 60_000 / MILLISECS_PER_BLOCK) as u32;
 }
 
 impl kitties::Trait for Runtime {
@@ -257,6 +258,7 @@ impl kitties::Trait for Runtime {
 	type Randomness = RandomnessCollectiveFlip;
 	type MaxBreedingAge = MaxBreedingAge;
 	type MinBreedingAge = MinBreedingAge;
+	type MaxLifespanDelta = MaxLifespanDelta;
 }
 
 construct_runtime!(

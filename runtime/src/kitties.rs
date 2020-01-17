@@ -17,6 +17,7 @@ pub trait Trait: system::Trait {
 	type Randomness: Randomness<Self::Hash>;
 	type MaxBreedingAge: Get<Self::BlockNumber>;
 	type MinBreedingAge: Get<Self::BlockNumber>;
+	type MaxLifespanDelta: Get<Self::BlockNumber>;
 }
 
 type BalanceOf<T> = <<T as Trait>::Currency as Currency<<T as system::Trait>::AccountId>>::Balance;
@@ -64,7 +65,7 @@ decl_event!(
 		Ask(AccountId, KittyIndex, Option<Balance>),
 		/// A kitty is sold. (from, to, kitty_id, price)
 		Sold(AccountId, AccountId, KittyIndex, Balance),
-		/// A kittiy died.(owner, kitty_id)
+		/// A kitty died.(owner, kitty_id)
 		Died(AccountId, KittyIndex),
 		
 	}
@@ -167,7 +168,7 @@ impl<T: Trait> Module<T> {
 		let dna = Self::random_value(sender);
 
 		// Create and store kitty
-		let kitty = Kitty { dna, lifespan: Self::gen_kitty_lifespan(), birthday: Self::block_number() };
+		let kitty = Kitty { dna, lifespan: Self::gen_kitty_lifespan(sender), birthday: Self::block_number() };
 		Self::insert_kitty(sender, kitty_id, kitty);
 
 		Self::deposit_event(RawEvent::Created(sender.clone(), kitty_id));
@@ -175,7 +176,11 @@ impl<T: Trait> Module<T> {
 	}
 
 	// 猫能活13~15年.
-	fn gen_kitty_lifespan() -> T::BlockNumber {
+	fn gen_kitty_lifespan(sender: &T::AccountId) -> T::BlockNumber {
+		let max: T::BlockNumber = T::MaxBreedingAge::get();
+		let min: T::BlockNumber = T::MinBreedingAge::get();
+		let delta: T::BlockNumber = T::MaxLifespanDelta::get();
+		let ran: T::BlockNumber = (u128::from_be_bytes(Self::random_value(sender)) as u32).into();
 		// TODO 随机生成猫的寿命, 如果2s一个块. 猫能活一天 86400s, 相当于 86400/2 个块. 寿命在一定范围内随机. 13~15年. 可以以注入的方式配置. 为了测试, 可以调短一点.
 		(86400 / 2).into()
 	}
@@ -273,7 +278,7 @@ impl<T: Trait> Module<T> {
 			new_dna[i] = combine_dna(kitty1_dna[i], kitty2_dna[i], selector[i]);
 		}
 
-		Self::insert_kitty(sender, kitty_id, Kitty { dna: new_dna, lifespan: Self::gen_kitty_lifespan(), birthday: Self::block_number() });
+		Self::insert_kitty(sender, kitty_id, Kitty { dna: new_dna, lifespan: Self::gen_kitty_lifespan(sender), birthday: Self::block_number() });
 
 		Ok(kitty_id)
 	}
@@ -359,6 +364,7 @@ mod tests {
 		// set breeding age as number of blocks
 		pub const MaxBreedingAge: u64 = 5 * 60000 / 2000;
 		pub const MinBreedingAge: u64 = 2 * 60000 / 2000;
+		pub const MaxLifespanDelta: u64 = 5 * 60_000 / 2000;
 	}
 
 	impl Trait for Test {
@@ -368,6 +374,7 @@ mod tests {
 		type Randomness = randomness_collective_flip::Module<Test>;
 		type MaxBreedingAge = MaxBreedingAge;
 		type MinBreedingAge = MinBreedingAge;
+		type MaxLifespanDelta = MaxLifespanDelta;
 	}
 
 	type OwnedKittiesListTest = OwnedKittiesList<Test>;
