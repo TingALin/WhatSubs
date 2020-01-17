@@ -245,12 +245,10 @@ impl sudo::Trait for Runtime {
 }
 
 parameter_types! {
-
-// set breeding age as number of blocks
-	pub const MaxBreedingAge: u64 = 5 * 60000 / MILLISECS_PER_BLOCK;
-	pub const MinBreedingAge: u64 = 2 * 60000 / MILLISECS_PER_BLOCK;
+	// set breeding age as number of blocks
+	pub const MaxBreedingAge: BlockNumber = (5 * 60_000 / MILLISECS_PER_BLOCK) as u32;
+	pub const MinBreedingAge: BlockNumber = (2 * 60_000 / MILLISECS_PER_BLOCK) as u32;
 }
-
 
 impl kitties::Trait for Runtime {
 	type Event = Event;

@@ -1,6 +1,6 @@
 use frame_support::{
 	decl_module, decl_storage, decl_event, decl_error, ensure, StorageValue, StorageMap,
-	Parameter, traits::{Randomness, Currency, ExistenceRequirement},
+	Parameter, traits::{Randomness, Currency, ExistenceRequirement, Get},
 	weights::SimpleDispatchInfo,
 };
 use sp_runtime::{traits::{SimpleArithmetic, Bounded, Member}, DispatchError};
@@ -15,8 +15,8 @@ pub trait Trait: system::Trait {
 	type KittyIndex: Parameter + Member + SimpleArithmetic + Bounded + Default + Copy;
 	type Currency: Currency<Self::AccountId>;
 	type Randomness: Randomness<Self::Hash>;
-	type MaxBreedingAge;
-	type MinBreedingAge;
+	type MaxBreedingAge: Get<Self::BlockNumber>;
+	type MinBreedingAge: Get<Self::BlockNumber>;
 }
 
 type BalanceOf<T> = <<T as Trait>::Currency as Currency<<T as system::Trait>::AccountId>>::Balance;
@@ -154,8 +154,6 @@ impl<T: Trait> Module<T> {
 			});
 			<KittyTombs<T>>::remove_prefix(n);
 		}
-
-
 	}
 
 	fn remove_kitty(owner: &T::AccountId, kitty_id: T::KittyIndex) {
@@ -361,10 +359,9 @@ mod tests {
 	}
 
 	parameter_types! {
-
-	// set breeding age as number of blocks
-		pub const MaxBreedingAge: u64 = 5 * 60000 / MILLISECS_PER_BLOCK;
-		pub const MinBreedingAge: u64 = 2 * 60000 / MILLISECS_PER_BLOCK;
+		// set breeding age as number of blocks
+		pub const MaxBreedingAge: u64 = 5 * 60000 / 2000;
+		pub const MinBreedingAge: u64 = 2 * 60000 / 2000;
 	}
 
 	impl Trait for Test {
@@ -427,6 +424,14 @@ mod tests {
 			assert_eq!(1, KittyModule::kitties_count());
 			KittyModule::transfer(Origin::signed(1), 0, 2);
 			assert_eq!(1, KittyModule::kitties_count());
+		});
+	}
+
+	#[test]
+	fn test_print_age_threshold() {
+		new_test_ext().execute_with(|| {
+			println!("{:?}", <Test as Trait>::MaxBreedingAge::get());
+			println!("{:?}", <Test as Trait>::MinBreedingAge::get());
 		});
 	}
 
