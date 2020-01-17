@@ -144,7 +144,7 @@ impl<T: Trait> Module<T> {
 			i += 1;
 			let owner = <KittyOwners<T>>::get(kitty_id).unwrap();
 			Self::remove_kitty(&owner, kitty_id);
-			Self::deposit_event(RawEvent::Died(owner.clone(), kitty_id));
+			Self::deposit_event(RawEvent::Died(owner, kitty_id));
 		}
 		if i > 0 {
 			<KittiesCount<T>>::mutate(|v| {
