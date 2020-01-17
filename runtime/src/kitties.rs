@@ -419,7 +419,7 @@ mod tests {
 		new_test_ext().execute_with(|| {
 			let _ = KittyModule::create_kitty(&1);
 			assert_eq!(1, KittyModule::kitties_count());
-			KittyModule::transfer(Origin::signed(1), 0, 2);
+			let _ = KittyModule::transfer(Origin::signed(1), 0, 2);
 			assert_eq!(1, KittyModule::kitties_count());
 		});
 	}
@@ -427,8 +427,8 @@ mod tests {
 	#[test]
 	fn test_print_age_threshold() {
 		new_test_ext().execute_with(|| {
-			println!("{:?}", <Test as Trait>::MaxBreedingAge::get());
-			println!("{:?}", <Test as Trait>::MinBreedingAge::get());
+			assert!(<Test as Trait>::MaxBreedingAge::get() > 0);
+			assert!(<Test as Trait>::MinBreedingAge::get() > 0);
 		});
 	}
 
